@@ -1,0 +1,125 @@
+service: serverless-lab
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  stage: dev
+  environment:
+    ORGANIZATIONS_TABLE: Organizations
+    USERS_TABLE: Users
+    IS_OFFLINE: ${env:IS_OFFLINE, 'false'}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Scan
+            - dynamodb:Query
+          Resource:
+            - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Organizations"
+            - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Users"
+
+plugins:
+#  - serverless-dynamodb-local
+  - serverless-dynamodb
+  - serverless-offline
+
+custom:
+  dynamodb:
+    stages:
+      - dev
+    start:
+      port: 8000
+      inMemory: true
+      migrate: true
+      seed: true
+      convertEmptyValues: true
+      noStart: false
+      sharedDb: true
+      accessKeyId: "fakeMyKeyId"
+      secretAccessKey: "fakeSecretAccessKey"
+      region: "us-east-1"
+
+functions:
+  createOrganization:
+    handler: handler.createOrganization
+    events:
+      - http:
+          path: organizations
+          method: post
+
+  updateOrganization:
+    handler: handler.updateOrganization
+    events:
+      - http:
+          path: organizations
+          method: put
+
+  createUser:
+    handler: handler.createUser
+    events:
+      - http:
+          path: organizations/{orgId}/users
+          method: post
+
+  updateUser:
+    handler: handler.updateUser
+    events:
+      - http:
+          path: organizations/{orgId}/users
+          method: put
+
+  getOrganizations:
+    handler: handler.getOrganizations
+    events:
+      - http:
+          path: organizations
+          method: get
+
+  getUsers:
+    handler: handler.getUsers
+    events:
+      - http:
+          path: users
+          method: get
+
+  getUsersByOrganization:
+    handler: handler.getUsersByOrganization
+    events:
+      - http:
+          path: organizations/{orgId}/users
+          method: get
+
+resources:
+  Resources:
+    OrganizationsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Organizations
+        AttributeDefinitions:
+          - AttributeName: orgId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: orgId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+
+    UsersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: Users
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
