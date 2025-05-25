@@ -39,3 +39,22 @@ serverless deploy
 
 # 9. Remove all deployed services from AWS
 serverless remove
+
+# Serverless Framework Lab6: AWS Lambda + AWS SQS + DynamoDB
+
+## Additional Setup: AWS CLI, Docker & Local SQS
+
+### Configure AWS CLI
+To enable deployment to AWS, configure credentials locally:
+
+```bash
+aws configure
+
+## Run Local SQS via Docker
+
+To emulate AWS SQS locally, run [ElasticMQ](https://github.com/softwaremill/elasticmq) in a Docker container:
+
+```bash
+docker run --rm -it -p 9324:9324 -p 9325:9325 softwaremill/elasticmq
+
+
