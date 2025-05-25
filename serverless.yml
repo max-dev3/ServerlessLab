@@ -1,5 +1,4 @@
 service: serverless-lab
-
 frameworkVersion: '3'
 
 provider:
@@ -8,45 +7,35 @@ provider:
   region: us-east-1
   stage: dev
   environment:
+    IS_OFFLINE: true
     ORGANIZATIONS_TABLE: Organizations
     USERS_TABLE: Users
-    IS_OFFLINE: ${env:IS_OFFLINE, 'false'}
 
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            - dynamodb:PutItem
-            - dynamodb:GetItem
-            - dynamodb:UpdateItem
-            - dynamodb:DeleteItem
-            - dynamodb:Scan
-            - dynamodb:Query
-          Resource:
-            - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Organizations"
-            - "arn:aws:dynamodb:${aws:region}:${aws:accountId}:table/Users"
+    CREATE_ORGANIZATION_QUEUE_URL: http://localhost:9324/000000000000/createOrganizationQueue-dev
+    UPDATE_ORGANIZATION_QUEUE_URL: http://localhost:9324/000000000000/updateOrganizationQueue-dev
+    CREATE_USER_QUEUE_URL:        http://localhost:9324/000000000000/createUserQueue-dev
+    UPDATE_USER_QUEUE_URL:        http://localhost:9324/000000000000/updateUserQueue-dev
 
 plugins:
-#  - serverless-dynamodb-local
   - serverless-dynamodb
   - serverless-offline
+  - serverless-offline-sqs
 
 custom:
   dynamodb:
-    stages:
-      - dev
+    stages: [dev]
     start:
       port: 8000
       inMemory: true
       migrate: true
-      seed: true
-      convertEmptyValues: true
-      noStart: false
       sharedDb: true
-      accessKeyId: "fakeMyKeyId"
-      secretAccessKey: "fakeSecretAccessKey"
-      region: "us-east-1"
+      convertEmptyValues: true
+
+  serverless-offline-sqs:
+    autoCreate: true
+    endpoint: http://localhost:9324
+    region: us-east-1
+    apiVersion: '2012-11-05'
 
 functions:
   createOrganization:
@@ -55,13 +44,15 @@ functions:
       - http:
           path: organizations
           method: post
+          cors: true
 
   updateOrganization:
     handler: handler.updateOrganization
     events:
       - http:
-          path: organizations
+          path: organizations/{orgId}
           method: put
+          cors: true
 
   createUser:
     handler: handler.createUser
@@ -69,13 +60,47 @@ functions:
       - http:
           path: organizations/{orgId}/users
           method: post
+          cors: true
 
   updateUser:
     handler: handler.updateUser
     events:
       - http:
-          path: organizations/{orgId}/users
+          path: organizations/{orgId}/users/{userId}
           method: put
+          cors: true
+
+  processCreateOrganization:
+    handler: handler.processCreateOrganization
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [CreateOrganizationQueue, Arn]
+          batchSize: 1
+
+  processUpdateOrganization:
+    handler: handler.processUpdateOrganization
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [UpdateOrganizationQueue, Arn]
+          batchSize: 1
+
+  processCreateUser:
+    handler: handler.processCreateUser
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [CreateUserQueue, Arn]
+          batchSize: 1
+
+  processUpdateUser:
+    handler: handler.processUpdateUser
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt: [UpdateUserQueue, Arn]
+          batchSize: 1
 
   getOrganizations:
     handler: handler.getOrganizations
@@ -83,6 +108,7 @@ functions:
       - http:
           path: organizations
           method: get
+          cors: true
 
   getUsers:
     handler: handler.getUsers
@@ -90,6 +116,7 @@ functions:
       - http:
           path: users
           method: get
+          cors: true
 
   getUsersByOrganization:
     handler: handler.getUsersByOrganization
@@ -97,9 +124,29 @@ functions:
       - http:
           path: organizations/{orgId}/users
           method: get
+          cors: true
 
 resources:
   Resources:
+    # --- SQS ---
+    CreateOrganizationQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: createOrganizationQueue-dev
+    UpdateOrganizationQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: updateOrganizationQueue-dev
+    CreateUserQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: createUserQueue-dev
+    UpdateUserQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: updateUserQueue-dev
+
+    # -- DynamoDB ---
     OrganizationsTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -107,9 +154,17 @@ resources:
         AttributeDefinitions:
           - AttributeName: orgId
             AttributeType: S
+          - AttributeName: name
+            AttributeType: S
         KeySchema:
           - AttributeName: orgId
             KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: NameIndex
+            KeySchema:
+              - AttributeName: name
+                KeyType: HASH
+            Projection: { ProjectionType: ALL }
         BillingMode: PAY_PER_REQUEST
 
     UsersTable:
@@ -119,7 +174,22 @@ resources:
         AttributeDefinitions:
           - AttributeName: userId
             AttributeType: S
+          - AttributeName: email
+            AttributeType: S
+          - AttributeName: orgId
+            AttributeType: S
         KeySchema:
           - AttributeName: userId
             KeyType: HASH
+        GlobalSecondaryIndexes:
+          - IndexName: EmailIndex
+            KeySchema:
+              - AttributeName: email
+                KeyType: HASH
+            Projection: { ProjectionType: ALL }
+          - IndexName: OrgIdIndex
+            KeySchema:
+              - AttributeName: orgId
+                KeyType: HASH
+            Projection: { ProjectionType: ALL }
         BillingMode: PAY_PER_REQUEST
